@@ -114,6 +114,21 @@ class AssessTests(SimpleTestCase):
         self.assertEqual(result.delta_pct, -100.0)  # current 0 vs usual 10
 
 
+class CompareTests(SimpleTestCase):
+    def test_compare_has_numbers_only_and_matches_assess(self):
+        counts = {weeks_before(n): 6 for n in range(1, 9)}
+        comparison = services.compare(counts, weeks_before(20), J)
+        self.assertEqual((comparison.current, comparison.usual), (0, 6))
+        self.assertFalse(hasattr(comparison, "status"))
+        self.assertEqual(comparison.delta_pct, -100.0)
+        assessed = assess(counts, weeks_before(20), J)
+        self.assertEqual((assessed.current, assessed.usual, assessed.status), (0, 6, BELOW))
+
+    def test_compare_without_enough_history(self):
+        comparison = services.compare({J: 7}, weeks_before(2), J)
+        self.assertEqual((comparison.current, comparison.usual), (7, None))
+
+
 class LocalWeekTests(SimpleTestCase):
     def week(self, iso_utc, tz):
         moment = datetime.fromisoformat(iso_utc).replace(tzinfo=UTC)
@@ -263,11 +278,26 @@ class ReportTests(TestCase):
         self.assertEqual(report.headline.usual, 9)
         self.assertEqual(report.headline.current, 10)
 
+    def test_headline_without_enough_history_has_no_baseline(self):
+        EventFactory.weekly(self.location(), [5] * 3, self.FIRST)  # first week + 2 history weeks
+        headline = services.activity_report(self.account, date(2026, 3, 23)).headline
+        self.assertEqual((headline.current, headline.usual), (5, None))
+        self.assertIsNone(headline.delta_pct)
+
+    def test_headline_carries_numbers_only(self):
+        EventFactory.weekly(self.location(), [10] * 9 + [4], self.FIRST)  # judged week far below usual
+        report = services.activity_report(self.account, date(2026, 5, 11))
+        self.assertFalse(hasattr(report.headline, "status"))
+        self.assertEqual((report.headline.current, report.headline.usual), (4, 10))
+        self.assertAlmostEqual(report.headline.delta_pct, -60.0)
+        self.assertEqual(report.locations[0].assessment.status, NORMAL)  # P(X <= 4 | 10) = 0.029
+
     def test_account_without_events_has_an_empty_report(self):
         empty = add_account(9, name="Quiet")
         report = services.activity_report(empty, date(2026, 7, 27))
         self.assertEqual(report.locations, [])
-        self.assertEqual((report.headline.current, report.headline.status), (0, NOT_ENOUGH_DATA))
+        self.assertEqual((report.headline.current, report.headline.usual), (0, None))
+        self.assertIsNone(report.headline.delta_pct)
 
     def test_locations_sort_below_first_by_largest_shortfall_then_by_name(self):
         specs = {"Z low": (10, 3), "A normal": (10, 10), "M lower": (10, 0), "B above": (10, 30)}
@@ -355,11 +385,30 @@ class SeedBackTestTests(TestCase):
     def test_account_with_no_events_is_empty(self):
         report = services.activity_report(Account.objects.get(id=20))
         self.assertEqual(report.locations, [])
-        self.assertEqual(report.headline.status, NOT_ENOUGH_DATA)
+        self.assertEqual((report.headline.current, report.headline.usual), (0, None))
 
-    def test_burst_week_headline_is_above_for_metro_collision(self):
+    def test_burst_week_headline_is_a_number_not_a_status(self):
         headline = self.reports[(date(2026, 6, 1), 6)].headline
-        self.assertEqual((headline.current, headline.usual, headline.status), (881, 66, ABOVE))
+        self.assertEqual((headline.current, headline.usual), (881, 66))
+        self.assertAlmostEqual(headline.delta_pct, (881 - 66) / 66 * 100)
+
+    def test_headline_has_no_status_for_any_account_or_week(self):
+        """The Poisson rule over-flags account totals (variance up to 2.3x the mean), so only
+        locations carry a status. Account 6 would have been flagged below in 3 of these 17 weeks."""
+        for report in self.reports.values():
+            self.assertFalse(hasattr(report.headline, "status"))
+        for week in (date(2026, 4, 13), date(2026, 5, 25), date(2026, 7, 13)):
+            headline = self.reports[(week, 6)].headline
+            self.assertLess(headline.current, headline.usual)  # shown as a drop, not as a flag
+        self.assertEqual(
+            (self.reports[(date(2026, 4, 13), 6)].headline.current, self.reports[(date(2026, 4, 13), 6)].headline.usual),
+            (55, 78.5),
+        )
+
+    def test_locations_of_the_same_account_still_get_statuses(self):
+        report = self.reports[(date(2026, 4, 13), 6)]
+        self.assertTrue(all(hasattr(loc.assessment, "status") for loc in report.locations))
+        self.assertIn(BELOW, {loc.assessment.status for loc in report.locations})  # Site G, usual 5.5, got 0
 
     def test_exactly_eight_seed_events_change_week_between_utc_and_local(self):
         zones = {a.id: ZoneInfo(a.timezone) for a in self.accounts}

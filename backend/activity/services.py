@@ -1,8 +1,11 @@
 """Weekly activity comparison for one account (DASH-247).
 
 For each location, and for the account as a whole, the judged week's event count is compared with a
-baseline: the median of up to the 8 complete local weeks before it. A count far below the baseline
-(Poisson lower tail) is flagged. See PLAN.md section 3 for the rules and their limitations.
+baseline: the median of up to the 8 complete local weeks before it. Only locations get a status: a
+count far below the baseline (Poisson lower tail) is flagged. The account headline is a numeric
+comparison only, because account totals vary more than Poisson allows (locations of one account
+move together), so the same rule would over-flag it. See PLAN.md section 3 for the rules and
+ai-log/DECISIONS.md for this later change to the headline.
 
 Independent of the API layer: callers pass an account and an optional as_of date.
 """
@@ -29,16 +32,24 @@ NOT_ENOUGH_DATA = "not_enough_data"
 
 
 @dataclass(frozen=True)
-class Assessment:
+class Comparison:
+    """The judged week's count next to its baseline. Used as-is for the account headline."""
+
     current: int
     usual: float | None  # None when there is not enough history
-    status: str
 
     @property
     def delta_pct(self):
         if not self.usual:
             return None
         return (self.current - self.usual) / self.usual * 100
+
+
+@dataclass(frozen=True)
+class Assessment(Comparison):
+    """A location's comparison plus its status."""
+
+    status: str
 
 
 @dataclass(frozen=True)
@@ -57,7 +68,7 @@ class AccountActivity:
     as_of: date
     week_start: date  # Monday of the judged week, in the account's timezone
     week_end: date  # Sunday of the judged week
-    headline: Assessment
+    headline: Comparison  # numbers only: no status, see the module docstring
     locations: list[LocationActivity]
 
 
@@ -94,20 +105,28 @@ def local_week_start(moment, zone):
     return week_start(moment.astimezone(zone).date())
 
 
-def assess(weekly_counts, first_week, judged_week):
-    """Compare the judged week with the baseline built from earlier weeks.
+def compare(weekly_counts, first_week, judged_week):
+    """Compare the judged week with the baseline built from earlier weeks (no status).
 
     weekly_counts maps a Monday to its event count; a missing week means zero events.
-    A location's history starts the week after its first event week (that week may be partial),
-    so weeks before then are not zeros. Needs MIN_HISTORY_WEEKS of history inside the window.
+    A history starts the week after the first event week (that week may be partial), so weeks
+    before then are not zeros. Needs MIN_HISTORY_WEEKS of history inside the window, otherwise
+    usual is None.
     """
     current = weekly_counts.get(judged_week, 0)
     window = [judged_week - timedelta(weeks=n) for n in range(WINDOW_WEEKS, 0, -1)]
     history = [w for w in window if w > first_week]
     if len(history) < MIN_HISTORY_WEEKS:
-        return Assessment(current, None, NOT_ENOUGH_DATA)
-    usual = statistics.median(weekly_counts.get(w, 0) for w in history)
-    return Assessment(current, usual, classify(usual, current))
+        return Comparison(current, None)
+    return Comparison(current, statistics.median(weekly_counts.get(w, 0) for w in history))
+
+
+def assess(weekly_counts, first_week, judged_week):
+    """A location's comparison plus its status (Poisson tails around the baseline)."""
+    result = compare(weekly_counts, first_week, judged_week)
+    if result.usual is None:
+        return Assessment(result.current, None, NOT_ENOUGH_DATA)
+    return Assessment(result.current, result.usual, classify(result.usual, result.current))
 
 
 def default_as_of():
@@ -158,9 +177,7 @@ def activity_report(account, as_of=None):
     locations.sort(key=_attention_order)
 
     headline = (
-        assess(account_weekly, min(account_weekly), judged)
-        if account_weekly
-        else Assessment(0, None, NOT_ENOUGH_DATA)
+        compare(account_weekly, min(account_weekly), judged) if account_weekly else Comparison(0, None)
     )
     return AccountActivity(
         account_id=account.id,
