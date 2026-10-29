@@ -1,4 +1,4 @@
-import { formatCount, formatDate, formatDelta, formatUsual, formatWeekRange } from "./format";
+import { formatCount, formatDate, formatDelta, formatTimezone, formatUsual, formatWeekRange } from "./format";
 
 describe("formatWeekRange", () => {
   it("shows the year once for a week inside one year", () => {
@@ -33,5 +33,20 @@ describe("number formatting", () => {
   it("groups thousands", () => {
     expect(formatCount(881)).toBe("881");
     expect(formatCount(12626)).toBe("12,626");
+  });
+});
+
+describe("formatTimezone", () => {
+  it("uses plain names for the zones in the data", () => {
+    expect(formatTimezone("America/Los_Angeles")).toBe("Pacific Time");
+    expect(formatTimezone("America/Chicago")).toBe("Central Time");
+    expect(formatTimezone("America/New_York")).toBe("Eastern Time");
+    expect(formatTimezone("America/Denver")).toBe("Mountain Time");
+    expect(formatTimezone("America/Phoenix")).toBe("Mountain Standard Time"); // no daylight saving
+    expect(formatTimezone("UTC")).toBe("UTC");
+  });
+
+  it("falls back to the city for an unknown zone instead of failing", () => {
+    expect(formatTimezone("Mars/Olympus_Mons")).toBe("Olympus Mons");
   });
 });

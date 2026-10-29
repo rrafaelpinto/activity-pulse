@@ -37,3 +37,17 @@ export function formatDelta(deltaPct: number | null): string {
   const body = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(Math.abs(deltaPct));
   return `${deltaPct > 0 ? "+" : MINUS}${body}%`;
 }
+
+/** "America/Los_Angeles" -> "Pacific Time". Falls back to the city name for unknown zones. */
+export function formatTimezone(zone: string): string {
+  if (zone === "UTC") return "UTC";
+  try {
+    const part = new Intl.DateTimeFormat("en-US", { timeZone: zone, timeZoneName: "longGeneric" })
+      .formatToParts(new Date())
+      .find((p) => p.type === "timeZoneName");
+    if (part && !part.value.startsWith("GMT")) return part.value;
+  } catch {
+    // Unknown zone: use the fallback below.
+  }
+  return (zone.split("/").pop() ?? zone).replace(/_/g, " ");
+}

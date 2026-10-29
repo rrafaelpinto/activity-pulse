@@ -86,7 +86,8 @@ describe("loading and default view", () => {
     expect(calls).toEqual(["/api/accounts/", "/api/accounts/1/activity/"]);
     expect(screen.getByLabelText("Account")).toHaveValue("1");
     expect(screen.getByLabelText("As of")).toHaveValue("2026-07-27");
-    expect(screen.getByText("Data available through Jul 27, 2026.")).toBeInTheDocument();
+    expect(screen.getByText("Data through Jul 27, 2026")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Weekly activity" })).toBeInTheDocument();
     await waitFor(() => expect(window.location.search).toBe("?account=1&as_of=2026-07-27"));
   });
 
@@ -95,10 +96,20 @@ describe("loading and default view", () => {
     render(<App />);
 
     const headline = await screen.findByRole("region", { name: /Week of/ });
-    expect(within(headline).getByLabelText("54 events this week")).toBeInTheDocument();
+    expect(within(headline).getByText("This week")).toBeInTheDocument();
+    expect(within(headline).getByText("54")).toBeInTheDocument();
+    expect(within(headline).getByText("Usual week")).toBeInTheDocument();
     expect(within(headline).getByText("56")).toBeInTheDocument();
     expect(within(headline).getByText("−3.6%")).toBeInTheDocument();
     expect(within(headline).queryByText(/below usual|above usual|normal|attention/i)).not.toBeInTheDocument();
+  });
+
+  it("shows a friendly timezone label instead of the IANA identifier", async () => {
+    api(() => ({ body: activity() })); // account 1 is America/Chicago
+    render(<App />);
+
+    expect(await screen.findByText(/Monday to Sunday · Central Time/)).toBeInTheDocument();
+    expect(screen.queryByText(/America\/Chicago/)).not.toBeInTheDocument();
   });
 });
 
@@ -118,8 +129,9 @@ describe("locations needing attention", () => {
     expect(await screen.findByText("1 location may need attention.")).toBeInTheDocument();
     const row = screen.getByRole("row", { name: /Site C/ });
     expect(row).toHaveAttribute("data-status", "below");
-    expect(within(row).getByText(/Below usual/)).toBeInTheDocument();
-    expect(within(row).getByText("May need attention")).toBeInTheDocument();
+    expect(within(row).getByText("Below usual")).toBeInTheDocument();
+    // The status chip and the summary line say it once each; there is no extra label in the row.
+    expect(screen.queryByText("May need attention")).not.toBeInTheDocument();
     expect(within(row).getByText("2")).toBeInTheDocument();
     expect(within(row).getByText("8.5")).toBeInTheDocument();
     expect(within(row).getByText("−76.5%")).toBeInTheDocument();
@@ -130,10 +142,10 @@ describe("locations needing attention", () => {
     render(<App />);
     await screen.findByText("1 location may need attention.");
 
-    for (const name of [/Site A/, /Site B/]) {
-      expect(within(screen.getByRole("row", { name })).queryByText("May need attention")).not.toBeInTheDocument();
-    }
-    expect(within(screen.getByRole("row", { name: /Site B/ })).getByText(/Above usual/)).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: /Site A/ })).toHaveAttribute("data-status", "normal");
+    expect(screen.getByRole("row", { name: /Site B/ })).toHaveAttribute("data-status", "above");
+    expect(within(screen.getByRole("row", { name: /Site B/ })).getByText("Above usual")).toBeInTheDocument();
+    expect(screen.getAllByText(/may need attention/i)).toHaveLength(1); // only the summary line
   });
 
   it("keeps the order given by the API (below-usual first)", async () => {
@@ -191,20 +203,22 @@ describe("insufficient history and empty accounts", () => {
     expect(within(row).getByText("Not enough history")).toBeInTheDocument();
     expect(within(row).getAllByText("—")).toHaveLength(2); // usual and change
     expect(screen.getByText(/1 location has too little history to compare\./)).toBeInTheDocument();
-    expect(within(row).queryByText("May need attention")).not.toBeInTheDocument();
+    expect(within(row).queryByText(/Below usual/)).not.toBeInTheDocument();
   });
 
   it("explains an account headline without enough history", async () => {
     api(() => ({ body: activity({ headline: { this_week: 5, usual: null, delta_pct: null } }) }));
     render(<App />);
-    expect(await screen.findByText(/Not enough history yet to show a usual week/)).toBeInTheDocument();
-    expect(screen.getByLabelText("5 events this week")).toBeInTheDocument();
+    expect(await screen.findByText("Needs at least 4 weeks of history")).toBeInTheDocument();
+    const headline = screen.getByRole("region", { name: /Week of/ });
+    expect(within(headline).getByText("5")).toBeInTheDocument();
+    expect(within(headline).getAllByText("\u2014")).toHaveLength(2); // usual and change
   });
 
   it("explains a zero usual without dividing by it", async () => {
     api(() => ({ body: activity({ headline: { this_week: 3, usual: 0, delta_pct: null } }) }));
     render(<App />);
-    expect(await screen.findByText(/no usual activity to compare with/)).toBeInTheDocument();
+    expect(await screen.findByText("No usual activity to compare with")).toBeInTheDocument();
   });
 
   it("shows an empty-state message for an account without activity", async () => {
@@ -215,9 +229,12 @@ describe("insufficient history and empty accounts", () => {
     );
     render(<App />);
 
-    expect(await screen.findByText("No activity recorded for this account up to this week.")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "No activity recorded yet" })).toBeInTheDocument();
+    expect(
+      screen.getByText(/Nothing has been recorded for Alpha Dental up to the week of Jul 20 – Jul 26, 2026\./),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Locations" })).not.toBeInTheDocument();
-    expect(screen.queryByLabelText(/events this week/)).not.toBeInTheDocument();
+    expect(screen.queryByText("This week")).not.toBeInTheDocument();
   });
 
   it("handles an empty account list", async () => {
@@ -350,7 +367,9 @@ describe("as-of date", () => {
     );
     render(<App />);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("cannot be later than the latest available event date");
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("That date is after the latest available data (Jul 27, 2026).");
+    expect(alert).not.toHaveTextContent("as_of"); // no developer wording in the UI
     await userEvent.click(screen.getByRole("button", { name: "Show latest week" }));
 
     expect(await screen.findByRole("heading", { name: /Week of Jul 20/ })).toBeInTheDocument();
@@ -372,6 +391,15 @@ describe("loading and errors", () => {
     release({ body: activity() });
     expect(await screen.findByRole("heading", { name: /Week of/ })).toBeInTheDocument();
     expect(screen.getByRole("main")).toHaveAttribute("aria-busy", "false");
+  });
+
+  it("uses plain words for any other rejected date", async () => {
+    api(() => ({ status: 400, body: { as_of: ["Date must be between 2000-01-01 and 2100-12-31."] } }));
+    render(<App />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("That date isn't available. Try another date.");
+    expect(screen.getByRole("button", { name: "Show latest week" })).toBeInTheDocument();
   });
 
   it("shows a server error and recovers with Try again", async () => {
@@ -422,11 +450,11 @@ describe("loading and errors", () => {
     await userEvent.selectOptions(screen.getByLabelText("Account"), "2");
     await waitFor(() => expect(releases[2]).toBeDefined());
     releases[2]({ body: activity({ headline: { this_week: 222, usual: 200, delta_pct: 11 }, account: ACCOUNTS[1] }) });
-    expect(await screen.findByLabelText("222 events this week")).toBeInTheDocument();
+    expect(await screen.findByText("222")).toBeInTheDocument();
 
     releases[1]({ body: activity({ headline: { this_week: 111, usual: 100, delta_pct: 11 } }) });
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(screen.getByLabelText("222 events this week")).toBeInTheDocument();
-    expect(screen.queryByLabelText("111 events this week")).not.toBeInTheDocument();
+    expect(screen.getByText("222")).toBeInTheDocument();
+    expect(screen.queryByText("111")).not.toBeInTheDocument();
   });
 });

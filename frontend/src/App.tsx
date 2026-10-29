@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ApiError, fetchAccounts, fetchActivity } from "./api";
 import { formatDate } from "./format";
+import { EmptyState } from "./EmptyState";
 import { HeadlinePanel } from "./HeadlinePanel";
 import { LocationTable } from "./LocationTable";
 import type { Account, ActivityResponse } from "./types";
@@ -12,6 +13,15 @@ type Load<T> =
   | { state: "ready"; data: T };
 
 const MIN_AS_OF = "2000-01-01"; // the API rejects earlier dates
+
+/** The API's as_of messages are written for developers; the page says it in plain words. */
+function friendlyError(error: ApiError): string {
+  if (error.field !== "as_of") return error.message;
+  const latest = error.message.match(/\((\d{4}-\d{2}-\d{2})\)/)?.[1];
+  return latest && isValidDate(latest)
+    ? `That date is after the latest available data (${formatDate(latest)}).`
+    : "That date isn't available. Try another date.";
+}
 
 function toApiError(error: unknown): ApiError {
   return error instanceof ApiError ? error : new ApiError(0, "Something went wrong.");
@@ -79,84 +89,105 @@ export default function App() {
   const shownAsOf = requestedAsOf ?? resolvedAsOf ?? "";
 
   return (
-    <div className="page">
-      <header>
-        <h1>Activity Pulse</h1>
-        <p className="muted">Is this week normal for us? Each location against its own recent history.</p>
+    <div className="app">
+      <header className="topbar">
+        <div className="topbar-inner">
+          <svg className="logo" viewBox="0 0 28 28" width="28" height="28" aria-hidden="true">
+            <rect width="28" height="28" rx="7" fill="currentColor" />
+            <path d="M5 15h4l2.5-7 4 12 2.5-5H23" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span className="brand">Activity Pulse</span>
+        </div>
       </header>
 
-      {accounts.state === "loading" && <p role="status">Loading accounts…</p>}
-      {accounts.state === "error" && (
-        <div className="alert" role="alert">
-          <p>{accounts.error.message}</p>
-          <button type="button" onClick={() => setAccountsAttempt((n) => n + 1)}>
-            Try again
-          </button>
+      <div className="page">
+        <div className="page-heading">
+          <h1>Weekly activity</h1>
+          <p>How each location compares with its usual week.</p>
         </div>
-      )}
-      {accountsReady && accounts.data.length === 0 && <p>No accounts available.</p>}
 
-      {accountsReady && accounts.data.length > 0 && (
-        <>
-          <form className="controls" onSubmit={(event) => event.preventDefault()}>
-            <label>
-              Account
-              <select
-                value={accountId ?? ""}
-                onChange={(event) => setAccountId(Number(event.target.value))}
-              >
-                {accounts.data.map((account) => (
-                  <option key={account.id} value={account.id}>
-                    {account.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              As of
-              <input
-                type="date"
-                value={shownAsOf}
-                min={MIN_AS_OF}
-                max={maxDate ?? undefined}
-                onChange={(event) => onDateChange(event.target.value)}
-              />
-            </label>
-            <button
-              type="button"
-              onClick={() => setRequestedAsOf(null)}
-              disabled={maxDate !== null && shownAsOf === maxDate}
-            >
-              Latest
+        {accounts.state === "loading" && <p className="state-card" role="status">Loading accounts…</p>}
+        {accounts.state === "error" && (
+          <div className="alert" role="alert">
+            <p>{accounts.error.message}</p>
+            <button type="button" onClick={() => setAccountsAttempt((n) => n + 1)}>
+              Try again
             </button>
-          </form>
-          {maxDate && <p className="muted data-note">Data available through {formatDate(maxDate)}.</p>}
+          </div>
+        )}
+        {accountsReady && accounts.data.length === 0 && <p className="state-card">No accounts available.</p>}
 
-          <main aria-busy={activity.state === "loading"}>
-            {activity.state === "loading" && <p role="status">Loading weekly activity…</p>}
-            {activity.state === "error" && (
-              <div className="alert" role="alert">
-                <p>{activity.error.message}</p>
-                {activity.error.field === "as_of" ? (
-                  <button type="button" onClick={() => setRequestedAsOf(null)}>
-                    Show latest week
-                  </button>
-                ) : (
-                  <button type="button" onClick={() => setActivityAttempt((n) => n + 1)}>
-                    Try again
-                  </button>
-                )}
+        {accountsReady && accounts.data.length > 0 && (
+          <>
+            <form className="toolbar" onSubmit={(event) => event.preventDefault()}>
+              <div className="field field-account">
+                <label htmlFor="account">Account</label>
+                <select
+                  id="account"
+                  value={accountId ?? ""}
+                  onChange={(event) => setAccountId(Number(event.target.value))}
+                >
+                  {accounts.data.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.name}
+                    </option>
+                  ))}
+                </select>
               </div>
-            )}
-            {activity.state === "ready" && (
-              <>
-                <HeadlinePanel data={activity.data} />
-                <LocationTable locations={activity.data.locations} />
-              </>
-            )}
-          </main>
-        </>
-      )}
+              <div className="field">
+                <label htmlFor="as-of">As of</label>
+                <div className="input-group">
+                  <input
+                    id="as-of"
+                    type="date"
+                    value={shownAsOf}
+                    min={MIN_AS_OF}
+                    max={maxDate ?? undefined}
+                    onChange={(event) => onDateChange(event.target.value)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setRequestedAsOf(null)}
+                    disabled={maxDate !== null && shownAsOf === maxDate}
+                  >
+                    Latest
+                  </button>
+                </div>
+              </div>
+              {maxDate && <p className="data-note">Data through {formatDate(maxDate)}</p>}
+            </form>
+
+            <main aria-busy={activity.state === "loading"}>
+              {activity.state === "loading" && (
+                <p className="state-card" role="status">Loading weekly activity…</p>
+              )}
+              {activity.state === "error" && (
+                <div className="alert" role="alert">
+                  <p>{friendlyError(activity.error)}</p>
+                  {activity.error.field === "as_of" ? (
+                    <button type="button" onClick={() => setRequestedAsOf(null)}>
+                      Show latest week
+                    </button>
+                  ) : (
+                    <button type="button" onClick={() => setActivityAttempt((n) => n + 1)}>
+                      Try again
+                    </button>
+                  )}
+                </div>
+              )}
+              {activity.state === "ready" &&
+                (activity.data.locations.length === 0 ? (
+                  <EmptyState data={activity.data} />
+                ) : (
+                  <>
+                    <HeadlinePanel data={activity.data} />
+                    <LocationTable locations={activity.data.locations} />
+                  </>
+                ))}
+            </main>
+          </>
+        )}
+      </div>
     </div>
   );
 }
