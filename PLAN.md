@@ -82,7 +82,7 @@ At the default `as_of` the result is 1 below, 1 above, 67 normal.
 **Limitations:**
 - Bursts and campaigns violate independence. The median limits the damage but cannot remove it.
 - Trends and seasonality are not modeled; a growing or shrinking location is compared with its own past.
-- Expect about 1.3 false alarms per Monday across the 69 locations (well under 1 per week for the largest account). The 0.025 threshold is a single tunable constant.
+- Expect about 1.3 flags per Monday across the 69 locations (well under 1 per week for the largest account). Without ground truth these are not necessarily false positives; they are locations the rule says deserve a look. The 0.025 threshold is a single tunable constant.
 - A location silent for most of the window gets a baseline of 0 and is never flagged. Event data cannot tell a closed location from a broken one.
 - A location with no events ever does not exist in the data.
 - Locations with a baseline under about 3.7 cannot be flagged at all; a single zero week is not strong enough evidence at that volume.
