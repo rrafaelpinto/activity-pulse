@@ -129,10 +129,15 @@ def assess(weekly_counts, first_week, judged_week):
     return Assessment(result.current, result.usual, classify(result.usual, result.current))
 
 
-def default_as_of():
-    """Date of the latest event in the database (UTC); today if there are no events."""
+def latest_event_date():
+    """UTC date of the latest event in the database, or None if there are no events."""
     latest = ActivityEvent.objects.aggregate(latest=Max("occurred_at"))["latest"]
-    return latest.astimezone(timezone.utc).date() if latest else date.today()
+    return latest.astimezone(timezone.utc).date() if latest else None
+
+
+def default_as_of():
+    """The latest event date; today if there are no events."""
+    return latest_event_date() or date.today()
 
 
 def activity_report(account, as_of=None):

@@ -2,6 +2,7 @@ from datetime import date
 
 from rest_framework import serializers
 
+from activity import services
 from activity.models import Account
 
 # as_of is a calendar date; bounds keep date arithmetic far from datetime.min/max.
@@ -23,6 +24,12 @@ class ActivityQuerySerializer(serializers.Serializer):
     def validate_as_of(self, value):
         if not AS_OF_MIN <= value <= AS_OF_MAX:
             raise serializers.ValidationError(f"Date must be between {AS_OF_MIN} and {AS_OF_MAX}.")
+        # Past the newest data, the empty recent weeks would read as a real drop in activity.
+        latest = services.latest_event_date()
+        if latest is not None and value > latest:
+            raise serializers.ValidationError(
+                f"as_of cannot be later than the latest available event date ({latest})."
+            )
         return value
 
 

@@ -52,6 +52,8 @@ class ActivityResponseTests(APITestCase):
         EventFactory.weekly(self.steady, [10] * 9 + [10], FIRST)
         EventFactory.weekly(self.dropped, [10] * 9 + [1], FIRST)
         EventFactory.weekly(self.dropped, [2] * 10, FIRST, "lead_created")  # per-type counts
+        # The newest event, so as_of dates up to 2026-05-12 are allowed. It is outside the judged weeks.
+        EventFactory.add(self.steady, datetime(2026, 5, 12, 15, 0, tzinfo=UTC))
 
     def get(self, **params):
         return self.client.get(activity_url(1, **params))
@@ -89,8 +91,6 @@ class ActivityResponseTests(APITestCase):
         self.assertEqual((dropped["calls"], dropped["leads"], dropped["appointments"]), (1, 2, 0))
 
     def test_default_as_of_is_the_latest_event_date(self):
-        EventFactory.add(self.steady, datetime(2026, 5, 12, 15, 0, tzinfo=UTC))  # Tuesday of week 05-11
-
         data = self.get().json()
 
         self.assertEqual(data["as_of"], "2026-05-12")
@@ -128,7 +128,6 @@ class ActivityResponseTests(APITestCase):
 
     def test_account_without_events_returns_an_empty_report(self):
         add_account(2, name="Quiet Harbor")
-        EventFactory.add(self.steady, datetime(2026, 5, 12, 15, 0, tzinfo=UTC))  # gives a default as_of
 
         data = self.client.get(activity_url(2)).json()
 
@@ -195,7 +194,8 @@ class ValidationAndErrorTests(APITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("blank", response.json()["as_of"][0])
 
-    def test_as_of_bounds_are_inclusive(self):
+    def test_as_of_bounds_are_inclusive_when_there_is_no_data(self):
+        # With no events there is no "latest event date", so only the static bounds apply.
         for value in ("2000-01-01", "2100-12-31"):
             self.assertEqual(self.client.get(activity_url(1, as_of=value)).status_code, 200, value)
 
@@ -218,6 +218,64 @@ class ValidationAndErrorTests(APITestCase):
     def test_no_authentication_is_required(self):
         for url in ("/api/accounts/", activity_url(1)):
             self.assertEqual(self.client.get(url).status_code, 200)
+
+
+class AsOfUpperBoundTests(APITestCase):
+    """as_of may not be later than the latest event date; history stays queryable."""
+
+    def setUp(self):
+        self.account = add_account(1)
+        self.location = Location.objects.create(account=self.account, name="Site A")
+        EventFactory.weekly(self.location, [5] * 6, FIRST)  # weeks 03-02 .. 04-06
+        # Newest event: Monday 2026-07-27 at 22:20 UTC (15:20 in Chicago).
+        EventFactory.add(self.location, datetime(2026, 7, 27, 22, 20, tzinfo=UTC))
+
+    def status(self, as_of):
+        return self.client.get(activity_url(1, as_of=as_of)).status_code
+
+    def test_the_latest_event_date_itself_is_allowed(self):
+        self.assertEqual(self.status("2026-07-27"), 200)
+
+    def test_the_day_after_the_latest_event_is_rejected_with_a_clear_message(self):
+        response = self.client.get(activity_url(1, as_of="2026-07-28"))
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json(),
+            {"as_of": ["as_of cannot be later than the latest available event date (2026-07-27)."]},
+        )
+
+    def test_dates_far_after_the_latest_event_are_rejected(self):
+        for value in ("2026-08-03", "2026-10-29", "2100-12-31"):
+            self.assertEqual(self.status(value), 400, value)
+
+    def test_historical_dates_still_work(self):
+        for value in ("2026-07-26", "2026-05-11", "2026-03-16", "2000-01-01"):
+            self.assertEqual(self.status(value), 200, value)
+
+    def test_the_boundary_is_the_utc_date_of_the_newest_event(self):
+        # Sunday 23:30 UTC: still Sunday 2026-08-02 in UTC even though it is Monday in some zones.
+        EventFactory.add(self.location, datetime(2026, 8, 2, 23, 30, tzinfo=UTC))
+        self.assertEqual(self.status("2026-08-02"), 200)
+        self.assertEqual(self.status("2026-08-03"), 400)
+
+    def test_the_default_as_of_always_passes_the_bound(self):
+        default = self.client.get(activity_url(1)).json()["as_of"]
+        self.assertEqual(default, "2026-07-27")
+        self.assertEqual(self.status(default), 200)
+
+    def test_an_account_without_events_follows_the_same_global_bound(self):
+        add_account(2, name="Quiet")
+        self.assertEqual(self.client.get(activity_url(2, as_of="2026-07-27")).status_code, 200)
+        self.assertEqual(self.client.get(activity_url(2, as_of="2026-07-28")).status_code, 400)
+
+    def test_format_errors_are_reported_before_the_bound(self):
+        response = self.client.get(activity_url(1, as_of="2026-13-45"))
+        self.assertIn("wrong format", response.json()["as_of"][0])
+
+    def test_validation_runs_before_the_account_lookup(self):
+        # Validation runs first, so a bad date on an unknown account is a 400, a good one a 404.
+        self.assertEqual(self.client.get(activity_url(999, as_of="2026-07-28")).status_code, 400)
+        self.assertEqual(self.client.get(activity_url(999, as_of="2026-07-27")).status_code, 404)
 
 
 class SeedApiTests(APITestCase):
@@ -276,6 +334,15 @@ class SeedApiTests(APITestCase):
         data = self.activity(20)
         self.assertEqual(data["locations"], [])
         self.assertEqual(data["headline"], {"this_week": 0, "usual": None, "delta_pct": None})
+
+    def test_as_of_after_the_last_seed_event_is_rejected(self):
+        """The trap from the M3 review: 2026-10-29 used to show everything as normal with usual 0."""
+        for value in ("2026-07-28", "2026-08-10", "2026-10-29"):
+            response = self.client.get(activity_url(12, as_of=value))
+            self.assertEqual(response.status_code, 400, value)
+            self.assertIn("2026-07-27", response.json()["as_of"][0])
+        self.assertEqual(self.client.get(activity_url(12, as_of="2026-07-27")).status_code, 200)
+        self.assertEqual(self.client.get(activity_url(12, as_of="2026-07-26")).status_code, 200)
 
     def test_every_account_and_week_answers_with_a_consistent_shape(self):
         for account in self.client.get("/api/accounts/").json():
