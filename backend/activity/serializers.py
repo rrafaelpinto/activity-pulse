@@ -71,6 +71,11 @@ class HeadlineSerializer(serializers.Serializer):
     delta_pct = RoundedFloatField(allow_null=True, help_text=DELTA_HELP)
 
 
+class WeekCountSerializer(serializers.Serializer):
+    week_start = serializers.DateField(help_text="Monday of that week (account's timezone).")
+    count = serializers.IntegerField(help_text="Events in that week; 0 for a week without activity.")
+
+
 class LocationActivitySerializer(serializers.Serializer):
     id = serializers.IntegerField(source="location_id")
     name = serializers.CharField()
@@ -88,6 +93,14 @@ class LocationActivitySerializer(serializers.Serializer):
     calls = serializers.IntegerField(help_text="call_received events in the judged week.")
     leads = serializers.IntegerField(help_text="lead_created events in the judged week.")
     appointments = serializers.IntegerField(help_text="appointment_set events in the judged week.")
+    history = WeekCountSerializer(
+        many=True,
+        help_text=(
+            "The weekly counts that usual is the median of, oldest first: up to 8 weeks before the "
+            "judged week, starting the week after the location's first event. Fewer than 4 means "
+            "usual is null."
+        ),
+    )
 
 
 class AccountActivitySerializer(serializers.Serializer):

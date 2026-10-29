@@ -12,7 +12,7 @@ UTC = timezone.utc
 FIRST = date(2026, 3, 2)  # a Monday
 
 LOCATION_KEYS = {
-    "id", "name", "this_week", "usual", "delta_pct", "status", "calls", "leads", "appointments",
+    "id", "name", "this_week", "usual", "delta_pct", "status", "calls", "leads", "appointments", "history",
 }
 
 
@@ -91,6 +91,34 @@ class ActivityResponseTests(APITestCase):
             (dropped["this_week"], dropped["usual"], dropped["delta_pct"]), (3, 12.0, -75.0)
         )
         self.assertEqual((dropped["calls"], dropped["leads"], dropped["appointments"]), (1, 2, 0))
+
+    def test_location_history_lists_the_weeks_behind_usual(self):
+        data = self.get(as_of="2026-05-11").json()  # judged week 05-04
+
+        dropped = next(l for l in data["locations"] if l["name"] == "Dropped")
+        self.assertEqual(
+            dropped["history"],
+            [{"week_start": f"2026-{m}", "count": 12} for m in ("03-09", "03-16", "03-23", "03-30", "04-06", "04-13", "04-20", "04-27")],
+        )
+        self.assertEqual(set(dropped["history"][0]), {"week_start", "count"})
+        self.assertEqual(dropped["usual"], 12.0)  # the median of exactly those counts
+
+    def test_history_covers_the_available_weeks_when_there_are_too_few(self):
+        newcomer = Location.objects.create(account=self.account, name="Newcomer")
+        EventFactory.weekly(newcomer, [4, 4], date(2026, 4, 20))
+
+        new = next(l for l in self.get(as_of="2026-05-11").json()["locations"] if l["name"] == "Newcomer")
+
+        self.assertEqual(new["history"], [{"week_start": "2026-04-27", "count": 4}])
+        self.assertIsNone(new["usual"])
+
+    def test_history_is_empty_in_a_locations_first_week(self):
+        fresh = Location.objects.create(account=self.account, name="Fresh")
+        EventFactory.add(fresh, datetime(2026, 5, 5, 15, 0, tzinfo=UTC))  # inside the judged week 05-04
+
+        row = next(l for l in self.get(as_of="2026-05-11").json()["locations"] if l["name"] == "Fresh")
+
+        self.assertEqual((row["history"], row["usual"], row["status"]), ([], None, "not_enough_data"))
 
     def test_default_as_of_is_the_latest_event_date(self):
         data = self.get().json()
@@ -356,6 +384,22 @@ class SeedApiTests(APITestCase):
             self.assertIn("2026-07-27", response.json()["as_of"][0])
         self.assertEqual(self.client.get(activity_url(12, as_of="2026-07-27")).status_code, 200)
         self.assertEqual(self.client.get(activity_url(12, as_of="2026-07-26")).status_code, 200)
+
+    def test_history_always_explains_usual_for_every_location_and_week(self):
+        import statistics
+
+        for account in self.client.get("/api/accounts/").json():
+            for as_of in ("2026-02-09", "2026-04-13", "2026-06-08", "2026-07-27"):
+                for row in self.activity(account["id"], as_of=as_of)["locations"]:
+                    counts = [w["count"] for w in row["history"]]
+                    weeks = [w["week_start"] for w in row["history"]]
+                    self.assertEqual(weeks, sorted(weeks), row["name"])
+                    self.assertLessEqual(len(counts), 8)
+                    if row["usual"] is None:
+                        self.assertLess(len(counts), 4)
+                    else:
+                        self.assertGreaterEqual(len(counts), 4)
+                        self.assertEqual(round(statistics.median(counts), 1), row["usual"])
 
     def test_every_account_and_week_answers_with_a_consistent_shape(self):
         for account in self.client.get("/api/accounts/").json():

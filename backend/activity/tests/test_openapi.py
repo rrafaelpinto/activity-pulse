@@ -50,6 +50,12 @@ class OpenApiSchemaTests(APITestCase):
         for nullable in ("usual", "delta_pct"):
             self.assertTrue(schemas["Headline"]["properties"][nullable]["nullable"])
 
+    def test_location_history_is_documented(self):
+        schemas = self.schema["components"]["schemas"]
+        self.assertEqual(set(schemas["WeekCount"]["properties"]), {"week_start", "count"})
+        history = schemas["LocationActivity"]["properties"]["history"]
+        self.assertEqual(history["type"], "array")
+
     def test_swagger_ui_page_is_served_and_points_at_the_schema(self):
         response = self.client.get("/api/docs/")
         self.assertEqual(response.status_code, 200)

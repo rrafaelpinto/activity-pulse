@@ -130,6 +130,37 @@ class CompareTests(SimpleTestCase):
         self.assertEqual((comparison.current, comparison.usual), (7, None))
 
 
+class HistoryWeeksTests(SimpleTestCase):
+    def test_lists_the_eight_weeks_before_the_judged_week_oldest_first(self):
+        counts = {weeks_before(n): n for n in range(1, 12)}
+        history = services.history_weeks(counts, weeks_before(20), J)
+        self.assertEqual([w.week_start for w in history], [weeks_before(n) for n in range(8, 0, -1)])
+        self.assertEqual([w.count for w in history], [8, 7, 6, 5, 4, 3, 2, 1])
+
+    def test_the_judged_week_is_not_part_of_its_own_history(self):
+        history = services.history_weeks({J: 99, weeks_before(1): 4}, weeks_before(20), J)
+        self.assertNotIn(J, [w.week_start for w in history])
+
+    def test_empty_weeks_after_the_first_event_are_listed_as_zero(self):
+        history = services.history_weeks({weeks_before(1): 5}, weeks_before(3), J)
+        self.assertEqual([(w.week_start, w.count) for w in history], [
+            (weeks_before(2), 0), (weeks_before(1), 5),
+        ])
+
+    def test_starts_the_week_after_the_first_event_week(self):
+        history = services.history_weeks({weeks_before(4): 3}, weeks_before(4), J)
+        self.assertEqual(history[0].week_start, weeks_before(3))
+
+    def test_no_history_when_the_first_event_is_in_the_judged_week(self):
+        self.assertEqual(services.history_weeks({J: 2}, J, J), [])
+
+    def test_usual_is_the_median_of_exactly_these_counts(self):
+        counts = {weeks_before(n): c for n, c in zip(range(1, 9), [6, 7, 2, 3, 5, 7, 8, 2])}
+        history = services.history_weeks(counts, weeks_before(20), J)
+        self.assertEqual(services.compare(counts, weeks_before(20), J).usual,
+                         services.statistics.median(w.count for w in history))
+
+
 class LocalWeekTests(SimpleTestCase):
     def week(self, iso_utc, tz):
         moment = datetime.fromisoformat(iso_utc).replace(tzinfo=UTC)
@@ -226,6 +257,34 @@ class ReportTests(TestCase):
         EventFactory.add(self.location("New"), datetime(2026, 4, 22, 12, tzinfo=UTC))
         report = services.activity_report(self.account, date(2026, 4, 13))  # judged 04-06
         self.assertEqual([loc.name for loc in report.locations], ["Old"])
+
+    def test_location_history_matches_the_baseline_and_keeps_zero_weeks(self):
+        loc = self.location()
+        EventFactory.weekly(loc, [4, 6, 0, 8, 2, 5, 7, 3, 9], self.FIRST)  # weeks 03-02 .. 04-27
+        report = services.activity_report(self.account, date(2026, 5, 4))  # judged 04-27
+        item = report.locations[0]
+        self.assertEqual(
+            [(w.week_start.isoformat(), w.count) for w in item.history],
+            [("2026-03-09", 6), ("2026-03-16", 0), ("2026-03-23", 8), ("2026-03-30", 2),
+             ("2026-04-06", 5), ("2026-04-13", 7), ("2026-04-20", 3)],
+        )
+        self.assertEqual(item.assessment.usual, services.statistics.median(w.count for w in item.history))
+
+    def test_location_without_enough_history_still_lists_its_weeks(self):
+        loc = self.location()
+        EventFactory.weekly(loc, [8] * 3, self.FIRST)
+        item = services.activity_report(self.account, date(2026, 3, 23)).locations[0]  # judged 03-16
+        self.assertEqual([w.week_start for w in item.history], [date(2026, 3, 9)])
+        self.assertIsNone(item.assessment.usual)
+
+    def test_history_is_per_account_week_in_the_account_timezone(self):
+        tokyo = add_account(2, "Asia/Tokyo")
+        loc = Location.objects.create(account=tokyo, name="Site T")
+        # Sunday 23:30 UTC is already Monday 08:30 in Tokyo: it belongs to the next local week.
+        EventFactory.add(loc, datetime(2026, 3, 8, 23, 30, tzinfo=UTC))
+        EventFactory.weekly(loc, [3] * 6, date(2026, 3, 16))
+        item = services.activity_report(tokyo, date(2026, 4, 20)).locations[0]  # judged 04-13
+        self.assertEqual(item.history[0].week_start, date(2026, 3, 16))  # first event week is 03-09 (local)
 
     def test_per_type_counts_for_the_judged_week(self):
         loc = self.location()

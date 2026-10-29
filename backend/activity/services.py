@@ -53,6 +53,12 @@ class Assessment(Comparison):
 
 
 @dataclass(frozen=True)
+class WeekCount:
+    week_start: date  # Monday, in the account's timezone
+    count: int
+
+
+@dataclass(frozen=True)
 class LocationActivity:
     location_id: int
     name: str
@@ -60,6 +66,7 @@ class LocationActivity:
     calls: int
     leads: int
     appointments: int
+    history: list[WeekCount]  # the weeks the baseline was computed from, oldest first
 
 
 @dataclass(frozen=True)
@@ -105,20 +112,27 @@ def local_week_start(moment, zone):
     return week_start(moment.astimezone(zone).date())
 
 
-def compare(weekly_counts, first_week, judged_week):
-    """Compare the judged week with the baseline built from earlier weeks (no status).
+def history_weeks(weekly_counts, first_week, judged_week):
+    """The weeks a baseline is built from, oldest first, with their counts.
 
     weekly_counts maps a Monday to its event count; a missing week means zero events.
     A history starts the week after the first event week (that week may be partial), so weeks
-    before then are not zeros. Needs MIN_HISTORY_WEEKS of history inside the window, otherwise
-    usual is None.
+    before then are not zeros.
+    """
+    window = [judged_week - timedelta(weeks=n) for n in range(WINDOW_WEEKS, 0, -1)]
+    return [WeekCount(w, weekly_counts.get(w, 0)) for w in window if w > first_week]
+
+
+def compare(weekly_counts, first_week, judged_week):
+    """Compare the judged week with the baseline built from earlier weeks (no status).
+
+    Needs MIN_HISTORY_WEEKS of history inside the window, otherwise usual is None.
     """
     current = weekly_counts.get(judged_week, 0)
-    window = [judged_week - timedelta(weeks=n) for n in range(WINDOW_WEEKS, 0, -1)]
-    history = [w for w in window if w > first_week]
+    history = history_weeks(weekly_counts, first_week, judged_week)
     if len(history) < MIN_HISTORY_WEEKS:
         return Comparison(current, None)
-    return Comparison(current, statistics.median(weekly_counts.get(w, 0) for w in history))
+    return Comparison(current, statistics.median(week.count for week in history))
 
 
 def assess(weekly_counts, first_week, judged_week):
@@ -177,6 +191,7 @@ def activity_report(account, as_of=None):
                 calls=types[ActivityEvent.EventType.CALL],
                 leads=types[ActivityEvent.EventType.LEAD],
                 appointments=types[ActivityEvent.EventType.APPOINTMENT],
+                history=history_weeks(counts, min(counts), judged),
             )
         )
     locations.sort(key=_attention_order)
