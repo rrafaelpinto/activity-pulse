@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import App from "./App";
 import type { Account, ActivityResponse, LocationActivity } from "./types";
+import { addDays } from "./weeks";
 
 const ACCOUNTS: Account[] = [
   { id: 1, name: "Alpha Dental", timezone: "America/Chicago" },
@@ -21,9 +22,28 @@ function location(overrides: Partial<LocationActivity> = {}): LocationActivity {
     calls: 4,
     leads: 3,
     appointments: 1,
+    history: weeklyHistory([8, 8, 8, 8, 8, 8, 8, 8]),
     ...overrides,
   };
 }
+
+/** Eight history weeks ending the week before the default judged week (Jul 20). */
+function weeklyHistory(counts: number[]) {
+  return counts.map((count, i) => ({
+    week_start: addDays("2026-07-13", -7 * (counts.length - 1 - i)),
+    count,
+  }));
+}
+
+/** The response the API gives for an as_of: the complete week before the week containing it. */
+function activityForAsOf(asOf: string | null, overrides: Partial<ActivityResponse> = {}) {
+  const day = asOf ?? "2026-07-27";
+  const weekday = (new Date(`${day}T00:00:00Z`).getUTCDay() + 6) % 7;
+  const start = addDays(day, -weekday - 7);
+  return activity({ as_of: day, week: { start, end: addDays(start, 6) }, ...overrides });
+}
+
+const weekControl = () => screen.getByRole("group", { name: "Week" });
 
 function activity(overrides: Partial<ActivityResponse> = {}): ActivityResponse {
   return {
@@ -85,7 +105,7 @@ describe("loading and default view", () => {
     expect(await screen.findByRole("heading", { name: /Week of Jul 20 – Jul 26, 2026/ })).toBeInTheDocument();
     expect(calls).toEqual(["/api/accounts/", "/api/accounts/1/activity/"]);
     expect(screen.getByLabelText("Account")).toHaveValue("1");
-    expect(screen.getByLabelText("As of")).toHaveValue("2026-07-27");
+    expect(weekControl()).toHaveTextContent("Jul 20 – Jul 26, 2026");
     expect(screen.getByText("Data through Jul 27, 2026")).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1, name: "Weekly activity" })).toBeInTheDocument();
     await waitFor(() => expect(window.location.search).toBe("?account=1&as_of=2026-07-27"));
@@ -188,6 +208,42 @@ describe("locations needing attention", () => {
   });
 });
 
+describe("information popovers and details", () => {
+  it("explains the usual week and the change on click", async () => {
+    api(() => ({ body: activity() }));
+    render(<App />);
+    await screen.findByRole("heading", { name: /Week of/ });
+
+    await userEvent.click(screen.getByRole("button", { name: "About the usual week" }));
+    expect(screen.getByText(/median of the up to 8 complete weeks before this one/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "About the change" }));
+    expect(screen.queryByText(/median of the up to 8 complete weeks/)).not.toBeInTheDocument();
+    expect(screen.getByText(/\(this week − usual\) ÷ usual/)).toBeInTheDocument();
+  });
+
+  it("collapses expanded locations when another week is shown", async () => {
+    api((_id, asOf) => ({ body: activityForAsOf(asOf) }));
+    render(<App />);
+    await screen.findByRole("heading", { name: /Week of Jul 20/ });
+    await userEvent.click(screen.getByRole("button", { name: "Site A" }));
+    expect(screen.getByRole("button", { name: "Site A" })).toHaveAttribute("aria-expanded", "true");
+
+    await userEvent.click(screen.getByRole("button", { name: "Previous week" }));
+    await screen.findByRole("heading", { name: /Week of Jul 13/ });
+
+    expect(screen.getByRole("button", { name: "Site A" })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("keeps the row order and one status chip per row when rows are expandable", async () => {
+    api(() => ({ body: activity({ locations: [location({ id: 2, name: "Site C", status: "below", this_week: 2, usual: 8.5, delta_pct: -76.5 }), location({ id: 1, name: "Site A" })] }) }));
+    render(<App />);
+    await screen.findByText("1 location may need attention.");
+
+    expect(screen.getAllByRole("rowheader").map((cell) => cell.textContent)).toEqual(["Site C", "Site A"]);
+    expect(screen.getAllByText("Below usual")).toHaveLength(1);
+  });
+});
+
 describe("insufficient history and empty accounts", () => {
   it("explains a location without enough history and shows no baseline", async () => {
     api(() => ({
@@ -247,14 +303,14 @@ describe("insufficient history and empty accounts", () => {
 describe("URL state", () => {
   it("restores the account and date from the URL after a reload", async () => {
     window.history.replaceState(null, "", "/?account=2&as_of=2026-06-08");
-    const calls = api((id) => ({ body: activity({ account: ACCOUNTS[id - 1], as_of: "2026-06-08" }) }));
+    const calls = api((id, asOf) => ({ body: { ...activityForAsOf(asOf), account: ACCOUNTS[id - 1] } }));
     render(<App />);
 
     await screen.findByRole("heading", { name: /Week of/ });
     expect(calls).toContain("/api/accounts/2/activity/?as_of=2026-06-08");
     expect(calls).not.toContain("/api/accounts/1/activity/");
     expect(screen.getByLabelText("Account")).toHaveValue("2");
-    expect(screen.getByLabelText("As of")).toHaveValue("2026-06-08");
+    expect(weekControl()).toHaveTextContent("Jun 1 – Jun 7, 2026");
     expect(window.location.search).toBe("?account=2&as_of=2026-06-08");
   });
 
@@ -280,7 +336,7 @@ describe("URL state", () => {
 
   it("updates the URL when the account changes and keeps the date", async () => {
     window.history.replaceState(null, "", "/?account=1&as_of=2026-06-08");
-    const calls = api((id, asOf) => ({ body: activity({ account: ACCOUNTS[id - 1], as_of: asOf ?? "2026-07-27" }) }));
+    const calls = api((id, asOf) => ({ body: { ...activityForAsOf(asOf), account: ACCOUNTS[id - 1] } }));
     render(<App />);
     await screen.findByRole("heading", { name: /Week of/ });
 
@@ -291,68 +347,146 @@ describe("URL state", () => {
   });
 });
 
-describe("as-of date", () => {
-  it("limits the date picker to the latest available date", async () => {
-    api(() => ({ body: activity({ latest_event_date: "2026-07-27" }) }));
+describe("week navigation", () => {
+  it("has no date picker: the week is chosen with previous, next and latest", async () => {
+    api(() => ({ body: activity() }));
     render(<App />);
     await screen.findByRole("heading", { name: /Week of/ });
-    expect(screen.getByLabelText("As of")).toHaveAttribute("max", "2026-07-27");
-    expect(screen.getByLabelText("As of")).toHaveAttribute("min", "2000-01-01");
+
+    expect(screen.queryByLabelText("As of")).not.toBeInTheDocument();
+    expect(within(weekControl()).getByRole("button", { name: "Previous week" })).toBeEnabled();
+    expect(within(weekControl()).getByRole("button", { name: "Next week" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Latest" })).toBeDisabled();
   });
 
-  it("loads a historical week and updates the URL", async () => {
-    const calls = api((_id, asOf) => ({
-      body: asOf
-        ? activity({ as_of: asOf, week: { start: "2026-06-01", end: "2026-06-07" } })
-        : activity(),
-    }));
+  it("goes to the previous week, asking the API for it, and updates the URL", async () => {
+    const calls = api((_id, asOf) => ({ body: activityForAsOf(asOf) }));
     render(<App />);
     await screen.findByRole("heading", { name: /Week of Jul 20/ });
 
-    fireEvent.change(screen.getByLabelText("As of"), { target: { value: "2026-06-08" } });
+    await userEvent.click(screen.getByRole("button", { name: "Previous week" }));
 
-    expect(await screen.findByRole("heading", { name: /Week of Jun 1 – Jun 7, 2026/ })).toBeInTheDocument();
-    expect(calls.at(-1)).toBe("/api/accounts/1/activity/?as_of=2026-06-08");
-    await waitFor(() => expect(window.location.search).toBe("?account=1&as_of=2026-06-08"));
+    expect(await screen.findByRole("heading", { name: /Week of Jul 13 – Jul 19, 2026/ })).toBeInTheDocument();
+    expect(calls.at(-1)).toBe("/api/accounts/1/activity/?as_of=2026-07-20");
+    expect(weekControl()).toHaveTextContent("Jul 13 – Jul 19, 2026");
+    await waitFor(() => expect(window.location.search).toBe("?account=1&as_of=2026-07-20"));
+    expect(screen.getByRole("button", { name: "Next week" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Latest" })).toBeEnabled();
   });
 
-  it("clamps a date typed past the maximum instead of requesting it", async () => {
-    const calls = api(() => ({ body: activity() }));
+  it("steps back several weeks and forward again", async () => {
+    const calls = api((_id, asOf) => ({ body: activityForAsOf(asOf) }));
     render(<App />);
-    await screen.findByRole("heading", { name: /Week of/ });
-    const before = calls.length;
+    await screen.findByRole("heading", { name: /Week of Jul 20/ });
 
-    fireEvent.change(screen.getByLabelText("As of"), { target: { value: "2026-10-29" } });
+    await userEvent.click(screen.getByRole("button", { name: "Previous week" }));
+    await screen.findByRole("heading", { name: /Week of Jul 13/ });
+    await userEvent.click(screen.getByRole("button", { name: "Previous week" }));
+    await screen.findByRole("heading", { name: /Week of Jul 6/ });
+    await userEvent.click(screen.getByRole("button", { name: "Next week" }));
 
-    await waitFor(() => expect(screen.getByLabelText("As of")).toHaveValue("2026-07-27"));
-    expect(calls.slice(before).some((url) => url.includes("2026-10-29"))).toBe(false);
+    expect(await screen.findByRole("heading", { name: /Week of Jul 13/ })).toBeInTheDocument();
+    expect(calls.slice(-3)).toEqual([
+      "/api/accounts/1/activity/?as_of=2026-07-20",
+      "/api/accounts/1/activity/?as_of=2026-07-13",
+      "/api/accounts/1/activity/?as_of=2026-07-20",
+    ]);
   });
 
-  it("ignores incomplete date input", async () => {
-    const calls = api(() => ({ body: activity() }));
+  it("reaches the latest week with Next and then disables it", async () => {
+    window.history.replaceState(null, "", "/?account=1&as_of=2026-07-13");
+    api((_id, asOf) => ({ body: activityForAsOf(asOf) }));
     render(<App />);
-    await screen.findByRole("heading", { name: /Week of/ });
-    const before = calls.length;
+    await screen.findByRole("heading", { name: /Week of Jul 6/ });
 
-    fireEvent.change(screen.getByLabelText("As of"), { target: { value: "" } });
+    await userEvent.click(screen.getByRole("button", { name: "Next week" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Next week" }));
 
-    expect(calls.length).toBe(before);
-    expect(screen.getByLabelText("As of")).toHaveValue("2026-07-27");
+    expect(await screen.findByRole("heading", { name: /Week of Jul 20/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Next week" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Latest" })).toBeDisabled();
   });
 
-  it("returns to the latest date with the Latest button", async () => {
+  it("works with a bookmarked date in the middle of a week", async () => {
+    window.history.replaceState(null, "", "/?account=1&as_of=2026-07-15"); // judged Jul 6 - Jul 12
+    const calls = api((_id, asOf) => ({ body: activityForAsOf(asOf) }));
+    render(<App />);
+    await screen.findByRole("heading", { name: /Week of Jul 6/ });
+
+    await userEvent.click(screen.getByRole("button", { name: "Next week" }));
+
+    await screen.findByRole("heading", { name: /Week of Jul 13/ });
+    expect(calls.at(-1)).toBe("/api/accounts/1/activity/?as_of=2026-07-20");
+  });
+
+  it("crosses a year boundary", async () => {
+    window.history.replaceState(null, "", "/?account=1&as_of=2026-01-05"); // judged Dec 29 - Jan 4
+    api((_id, asOf) => ({ body: activityForAsOf(asOf, { latest_event_date: "2026-07-27" }) }));
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: /Week of Dec 29, 2025 – Jan 4, 2026/ })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Next week" }));
+
+    expect(await screen.findByRole("heading", { name: /Week of Jan 5 – Jan 11, 2026/ })).toBeInTheDocument();
+  });
+
+  it("returns to the latest week with the Latest button", async () => {
     window.history.replaceState(null, "", "/?account=1&as_of=2026-06-08");
-    const calls = api((_id, asOf) => ({ body: activity({ as_of: asOf ?? "2026-07-27" }) }));
+    const calls = api((_id, asOf) => ({ body: activityForAsOf(asOf) }));
     render(<App />);
-    await screen.findByRole("heading", { name: /Week of/ });
+    await screen.findByRole("heading", { name: /Week of Jun 1/ });
     const latest = screen.getByRole("button", { name: "Latest" });
     expect(latest).toBeEnabled();
 
     await userEvent.click(latest);
 
     await waitFor(() => expect(calls.at(-1)).toBe("/api/accounts/1/activity/"));
+    expect(await screen.findByRole("heading", { name: /Week of Jul 20/ })).toBeInTheDocument();
     await waitFor(() => expect(window.location.search).toBe("?account=1&as_of=2026-07-27"));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Latest" })).toBeDisabled());
+    expect(screen.getByRole("button", { name: "Latest" })).toBeDisabled();
+  });
+
+  it("can be used from the keyboard", async () => {
+    const calls = api((_id, asOf) => ({ body: activityForAsOf(asOf) }));
+    render(<App />);
+    await screen.findByRole("heading", { name: /Week of Jul 20/ });
+
+    screen.getByRole("button", { name: "Previous week" }).focus();
+    await userEvent.keyboard("{Enter}");
+
+    expect(await screen.findByRole("heading", { name: /Week of Jul 13/ })).toBeInTheDocument();
+    expect(calls.at(-1)).toBe("/api/accounts/1/activity/?as_of=2026-07-20");
+  });
+
+  it("keeps the week on screen and waits for the response before allowing another move", async () => {
+    let release: (value: { body: unknown }) => void = () => {};
+    mockApi((url) => {
+      if (url === "/api/accounts/") return { body: ACCOUNTS };
+      if (url.endsWith("as_of=2026-07-20")) return new Promise((resolve) => (release = resolve));
+      return { body: activityForAsOf(null) };
+    });
+    render(<App />);
+    await screen.findByRole("heading", { name: /Week of Jul 20/ });
+
+    await userEvent.click(screen.getByRole("button", { name: "Previous week" }));
+
+    expect(await screen.findByText("Loading weekly activity…")).toBeInTheDocument();
+    expect(weekControl()).toHaveTextContent("Jul 20 – Jul 26, 2026"); // last shown week, not blank
+    expect(screen.getByRole("button", { name: "Previous week" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Next week" })).toBeDisabled();
+    release({ body: activityForAsOf("2026-07-20") });
+    expect(await screen.findByRole("heading", { name: /Week of Jul 13/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Previous week" })).toBeEnabled();
+  });
+
+  it("does not go back before the first recorded activity", async () => {
+    api((_id, asOf) => ({
+      body: activityForAsOf(asOf, { headline: { this_week: 0, usual: null, delta_pct: null }, locations: [] }),
+    }));
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "No activity recorded yet" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Previous week" })).toBeDisabled();
   });
 
   it("offers the latest week when a bookmarked date is past the data", async () => {
@@ -370,6 +504,9 @@ describe("as-of date", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("That date is after the latest available data (Jul 27, 2026).");
     expect(alert).not.toHaveTextContent("as_of"); // no developer wording in the UI
+    expect(screen.getByRole("button", { name: "Previous week" })).toBeDisabled(); // no week to move from
+    expect(screen.getByRole("button", { name: "Next week" })).toBeDisabled();
+    expect(weekControl()).toHaveTextContent("—");
     await userEvent.click(screen.getByRole("button", { name: "Show latest week" }));
 
     expect(await screen.findByRole("heading", { name: /Week of Jul 20/ })).toBeInTheDocument();

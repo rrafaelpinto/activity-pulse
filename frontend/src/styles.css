@@ -27,6 +27,7 @@
   --danger-border: #fecdca;
 
   --shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow-pop: 0 8px 24px rgba(16, 24, 40, 0.16);
   color-scheme: light dark;
 }
 
@@ -58,6 +59,7 @@
     --danger-border: #5c2420;
 
     --shadow: none;
+    --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.55);
   }
 }
 
@@ -154,14 +156,14 @@ dd {
   gap: 6px;
 }
 
-.field label {
+.field label,
+.field-label {
   font-size: 0.75rem;
   font-weight: 600;
   color: var(--text-muted);
 }
 
 select,
-input,
 button {
   height: 38px;
   font: inherit;
@@ -177,17 +179,45 @@ select {
   max-width: 100%;
 }
 
-.input-group {
+.week-controls {
   display: flex;
+  gap: 8px;
 }
 
-.input-group input {
+.week-nav {
+  display: flex;
+  flex: 1;
+}
+
+.week-nav button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  padding: 0;
+}
+
+.week-nav button:first-child {
   border-radius: 8px 0 0 8px;
 }
 
-.input-group button {
+.week-nav button:last-child {
   border-radius: 0 8px 8px 0;
-  border-left: 0;
+}
+
+.week-range {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 38px;
+  min-width: 190px;
+  padding: 0 14px;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  background: var(--surface);
+  border: solid var(--border-strong);
+  border-width: 1px 0;
 }
 
 button {
@@ -267,6 +297,9 @@ button:disabled {
 }
 
 .stat dt {
+  display: flex;
+  align-items: center;
+  min-height: 24px; /* the info button makes two of the three labels taller */
   font-size: 0.75rem;
   font-weight: 600;
   color: var(--text-muted);
@@ -295,6 +328,86 @@ button:disabled {
   min-height: 1.25rem;
   font-size: 0.8125rem;
   color: var(--text-subtle);
+}
+
+/* Information popovers */
+.info {
+  position: relative;
+  display: inline-flex;
+  margin-left: 2px;
+}
+
+.info-button,
+.info-button:hover:not(:disabled) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: var(--text-subtle);
+  background: none;
+  border: 0;
+  border-radius: 50%;
+}
+
+.info-button:hover:not(:disabled),
+.info-button[aria-expanded="true"] {
+  color: var(--accent);
+}
+
+.popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  z-index: 20;
+  width: 300px;
+  max-width: calc(100vw - 32px);
+  padding: 12px 14px;
+  font-size: 0.8125rem;
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: normal;
+  text-align: left;
+  text-transform: none;
+  white-space: normal;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow: var(--shadow-pop);
+}
+
+.popover:focus {
+  outline: none;
+}
+
+.popover-start {
+  left: -4px;
+}
+
+.popover-end {
+  right: -4px;
+}
+
+.popover p + p,
+.popover p + ul,
+.popover ul + p {
+  margin-top: 8px;
+}
+
+.popover ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.popover li + li {
+  margin-top: 4px;
+}
+
+.title-with-info {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 /* Locations */
@@ -396,6 +509,111 @@ tr[data-status="below"]:hover {
 
 tr[data-status="below"] td.change {
   color: var(--warn-text);
+}
+
+.row-toggle,
+.row-toggle:hover:not(:disabled) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: auto;
+  margin: -4px 0 -4px -2px;
+  padding: 4px 8px 4px 2px;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+}
+
+.row-toggle:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.chevron {
+  flex: none;
+  color: var(--text-subtle);
+}
+
+tr.is-open .chevron {
+  transform: rotate(90deg);
+}
+
+tr.is-open th,
+tr.is-open td {
+  border-bottom-color: transparent;
+}
+
+/* Expanded location: the numbers behind its status. */
+.detail-row td {
+  padding: 0;
+  background: var(--surface-subtle);
+}
+
+tr.detail-row:hover {
+  background: var(--surface-subtle);
+}
+
+.detail {
+  padding: 4px 20px 18px 40px;
+  white-space: normal;
+}
+
+.detail-summary {
+  margin-bottom: 14px;
+  color: var(--text-muted);
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 16px 40px;
+}
+
+.detail h3 {
+  margin: 0 0 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+}
+
+.mini-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mini-stats > div {
+  min-width: 56px;
+  padding: 6px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.mini-stats dt {
+  font-size: 0.6875rem;
+  color: var(--text-subtle);
+}
+
+.mini-stats dd {
+  font-size: 1rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.weeks > div {
+  text-align: center;
+}
+
+.detail-note {
+  margin-top: 8px;
+  font-size: 0.8125rem;
+  color: var(--text-subtle);
 }
 
 .status {
@@ -528,9 +746,31 @@ tr[data-status="below"] td.change {
     min-width: 0;
   }
 
-  .input-group input {
+  .week-range {
     flex: 1;
     min-width: 0;
+    padding: 0 8px;
+  }
+
+  /* On a phone the popover is a sheet at the bottom of the screen, clear of the layout. */
+  .popover,
+  .popover-start,
+  .popover-end {
+    position: fixed;
+    top: auto;
+    right: 16px;
+    bottom: 16px;
+    left: 16px;
+    width: auto;
+    max-width: none;
+  }
+
+  .detail {
+    padding: 4px 16px 16px 32px;
+  }
+
+  .detail-grid {
+    grid-template-columns: 1fr;
   }
 
   .data-note {

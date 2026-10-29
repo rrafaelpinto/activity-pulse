@@ -4,6 +4,7 @@ import { formatDate } from "./format";
 import { EmptyState } from "./EmptyState";
 import { HeadlinePanel } from "./HeadlinePanel";
 import { LocationTable } from "./LocationTable";
+import { WeekNav } from "./WeekNav";
 import type { Account, ActivityResponse } from "./types";
 import { isValidDate, parseUrlState, writeUrlState } from "./urlState";
 
@@ -11,8 +12,6 @@ type Load<T> =
   | { state: "loading" }
   | { state: "error"; error: ApiError }
   | { state: "ready"; data: T };
-
-const MIN_AS_OF = "2000-01-01"; // the API rejects earlier dates
 
 /** The API's as_of messages are written for developers; the page says it in plain words. */
 function friendlyError(error: ApiError): string {
@@ -41,6 +40,7 @@ export default function App() {
   const [activity, setActivity] = useState<Load<ActivityResponse>>({ state: "loading" });
   const [activityAttempt, setActivityAttempt] = useState(0);
   const [maxDate, setMaxDate] = useState<string | null>(null);
+  const [shownWeek, setShownWeek] = useState<ActivityResponse["week"] | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -67,6 +67,7 @@ export default function App() {
       .then((data) => {
         setActivity({ state: "ready", data });
         setMaxDate(data.latest_event_date);
+        setShownWeek(data.week);
       })
       .catch((error) => {
         if (!isAbort(error)) setActivity({ state: "error", error: toApiError(error) });
@@ -79,14 +80,6 @@ export default function App() {
     if (accountId === null) return;
     writeUrlState({ account: accountId, asOf: requestedAsOf ?? resolvedAsOf });
   }, [accountId, requestedAsOf, resolvedAsOf]);
-
-  function onDateChange(value: string) {
-    // Incomplete input arrives as "": ignore it; the Latest button is the way back.
-    if (!isValidDate(value)) return;
-    setRequestedAsOf(maxDate !== null && value > maxDate ? maxDate : value);
-  }
-
-  const shownAsOf = requestedAsOf ?? resolvedAsOf ?? "";
 
   return (
     <div className="app">
@@ -134,26 +127,11 @@ export default function App() {
                   ))}
                 </select>
               </div>
-              <div className="field">
-                <label htmlFor="as-of">As of</label>
-                <div className="input-group">
-                  <input
-                    id="as-of"
-                    type="date"
-                    value={shownAsOf}
-                    min={MIN_AS_OF}
-                    max={maxDate ?? undefined}
-                    onChange={(event) => onDateChange(event.target.value)}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setRequestedAsOf(null)}
-                    disabled={maxDate !== null && shownAsOf === maxDate}
-                  >
-                    Latest
-                  </button>
-                </div>
-              </div>
+              <WeekNav
+                week={shownWeek}
+                data={activity.state === "ready" ? activity.data : null}
+                onSelect={setRequestedAsOf}
+              />
               {maxDate && <p className="data-note">Data through {formatDate(maxDate)}</p>}
             </form>
 
@@ -181,7 +159,10 @@ export default function App() {
                 ) : (
                   <>
                     <HeadlinePanel data={activity.data} />
-                    <LocationTable locations={activity.data.locations} />
+                    <LocationTable
+                      key={`${activity.data.account.id}-${activity.data.week.start}`}
+                      locations={activity.data.locations}
+                    />
                   </>
                 ))}
             </main>

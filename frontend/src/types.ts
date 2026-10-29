@@ -12,6 +12,11 @@ export interface Headline {
   delta_pct: number | null;
 }
 
+export interface WeekCount {
+  week_start: string;
+  count: number;
+}
+
 export interface LocationActivity {
   id: number;
   name: string;
@@ -22,6 +27,8 @@ export interface LocationActivity {
   calls: number;
   leads: number;
   appointments: number;
+  /** The weekly counts the usual week is the median of, oldest first. */
+  history: WeekCount[];
 }
 
 export interface ActivityResponse {

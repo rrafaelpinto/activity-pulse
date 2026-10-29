@@ -21,6 +21,11 @@ export function formatDate(value: string): string {
   return formatDay(value, { month: "short", day: "numeric", year: "numeric" });
 }
 
+/** "Jul 20" (no year; used where the week is already clear from context). */
+export function formatShortDate(value: string): string {
+  return formatDay(value, { month: "short", day: "numeric" });
+}
+
 export function formatCount(value: number): string {
   return new Intl.NumberFormat("en-US").format(value);
 }
