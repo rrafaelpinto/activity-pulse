@@ -76,11 +76,11 @@ class ActivityEvent(models.Model):
         # apparent duplicates in the seed are kept.
         constraints = [
             models.CheckConstraint(
-                check=Q(event_type__in=["call_received", "lead_created", "appointment_set"]),
+                condition=Q(event_type__in=["call_received", "lead_created", "appointment_set"]),
                 name="event_type_valid",
             ),
             models.CheckConstraint(
-                check=(
+                condition=(
                     Q(outcome__isnull=True)
                     | (Q(event_type="call_received") & Q(outcome__in=CALL_OUTCOMES))
                     | (Q(event_type="lead_created") & Q(outcome__in=LEAD_OUTCOMES))
@@ -89,7 +89,7 @@ class ActivityEvent(models.Model):
                 name="event_outcome_valid_for_type",
             ),
             models.CheckConstraint(
-                check=Q(duration_seconds__isnull=True)
+                condition=Q(duration_seconds__isnull=True)
                 | (Q(event_type="call_received") & Q(duration_seconds__gt=0)),
                 name="event_duration_only_for_calls",
             ),
