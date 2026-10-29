@@ -13,7 +13,15 @@ AS_OF_MAX = date(2100, 12, 31)
 class ActivityQuerySerializer(serializers.Serializer):
     """Validates the query string of the activity endpoint."""
 
-    as_of = serializers.DateField(required=False, input_formats=["%Y-%m-%d"])
+    as_of = serializers.DateField(
+        required=False,
+        input_formats=["%Y-%m-%d"],
+        help_text=(
+            "YYYY-MM-DD, interpreted in the account's timezone. The judged week is the complete week "
+            "before the week containing this date. Defaults to the latest event date; later dates "
+            "are rejected."
+        ),
+    )
 
     def to_internal_value(self, data):
         # DRF treats an empty value as "not provided"; an explicit empty as_of is a client mistake.
@@ -46,31 +54,55 @@ class AccountSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "timezone"]
 
 
+USUAL_HELP = "Median of the up to 8 weeks before the judged week; null without 4 weeks of history."
+DELTA_HELP = "Percentage change of this_week against usual, one decimal; null when usual is null or 0."
+
+
+class WeekSerializer(serializers.Serializer):
+    start = serializers.DateField(source="week_start", help_text="Monday of the judged week (account's timezone).")
+    end = serializers.DateField(source="week_end", help_text="Sunday of the judged week.")
+
+
 class HeadlineSerializer(serializers.Serializer):
     """Numbers only: no status for the account as a whole."""
 
-    this_week = serializers.IntegerField(source="current")
-    usual = RoundedFloatField(allow_null=True)
-    delta_pct = RoundedFloatField(allow_null=True)
+    this_week = serializers.IntegerField(source="current", help_text="Events in the judged week, all locations.")
+    usual = RoundedFloatField(allow_null=True, help_text="Median of the account's own weekly totals over the same window; null without 4 weeks of history.")
+    delta_pct = RoundedFloatField(allow_null=True, help_text=DELTA_HELP)
 
 
 class LocationActivitySerializer(serializers.Serializer):
     id = serializers.IntegerField(source="location_id")
     name = serializers.CharField()
-    this_week = serializers.IntegerField(source="assessment.current")
-    usual = RoundedFloatField(source="assessment.usual", allow_null=True)
-    delta_pct = RoundedFloatField(source="assessment.delta_pct", allow_null=True)
-    status = serializers.CharField(source="assessment.status")
-    calls = serializers.IntegerField()
-    leads = serializers.IntegerField()
-    appointments = serializers.IntegerField()
+    this_week = serializers.IntegerField(source="assessment.current", help_text="Events in the judged week.")
+    usual = RoundedFloatField(source="assessment.usual", allow_null=True, help_text=USUAL_HELP)
+    delta_pct = RoundedFloatField(source="assessment.delta_pct", allow_null=True, help_text=DELTA_HELP)
+    status = serializers.ChoiceField(
+        source="assessment.status",
+        choices=[services.BELOW, services.NORMAL, services.ABOVE, services.NOT_ENOUGH_DATA],
+        help_text=(
+            "below/above: this_week is unusually low/high against usual (Poisson tail, p < 0.025); "
+            "below may need attention. not_enough_data: fewer than 4 weeks of history."
+        ),
+    )
+    calls = serializers.IntegerField(help_text="call_received events in the judged week.")
+    leads = serializers.IntegerField(help_text="lead_created events in the judged week.")
+    appointments = serializers.IntegerField(help_text="appointment_set events in the judged week.")
 
 
 class AccountActivitySerializer(serializers.Serializer):
-    as_of = serializers.DateField()
-    week = serializers.SerializerMethodField()
+    """Response of the activity endpoint. Locations are sorted below-usual first."""
+
+    account = AccountSerializer()
+    as_of = serializers.DateField(help_text="The date used; defaults to the latest event date.")
+    week = WeekSerializer(source="*")
     headline = HeadlineSerializer()
     locations = LocationActivitySerializer(many=True)
 
-    def get_week(self, report):
-        return {"start": report.week_start.isoformat(), "end": report.week_end.isoformat()}
+
+class ErrorSerializer(serializers.Serializer):
+    detail = serializers.CharField()
+
+
+class AsOfErrorSerializer(serializers.Serializer):
+    as_of = serializers.ListField(child=serializers.CharField())

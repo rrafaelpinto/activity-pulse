@@ -14,12 +14,22 @@ DEBUG = True
 ALLOWED_HOSTS = []
 
 INSTALLED_APPS = [
+    "drf_spectacular",
     "activity",
 ]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.middleware.common.CommonMiddleware",
+]
+
+# Templates are only needed for the Swagger UI page served by drf-spectacular.
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [],
+        "APP_DIRS": True,
+    }
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -46,4 +56,18 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [],
     "DEFAULT_PERMISSION_CLASSES": [],
     "UNAUTHENTICATED_USER": None,
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+}
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Activity Pulse API",
+    "DESCRIPTION": (
+        "Read-only API for DASH-247: compares a customer's last complete local week of activity with "
+        "its recent history, per location. No authentication."
+    ),
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+    # Swagger UI assets come from a CDN; pinned so the page does not change under us.
+    "SWAGGER_UI_DIST": "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14",
+    "SWAGGER_UI_SETTINGS": {"defaultModelsExpandDepth": 1, "tryItOutEnabled": True},
 }
