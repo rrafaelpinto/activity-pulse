@@ -95,6 +95,10 @@ class AccountActivitySerializer(serializers.Serializer):
 
     account = AccountSerializer()
     as_of = serializers.DateField(help_text="The date used; defaults to the latest event date.")
+    latest_event_date = serializers.DateField(
+        allow_null=True,
+        help_text="Latest event date in the data (UTC) and the maximum allowed as_of; null if there are no events.",
+    )
     week = WeekSerializer(source="*")
     headline = HeadlineSerializer()
     locations = LocationActivitySerializer(many=True)

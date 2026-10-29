@@ -47,4 +47,7 @@ def account_activity(request, account_id):
         raise NotFound("Account not found.")
 
     report = services.activity_report(account, query.validated_data.get("as_of"))
-    return Response(AccountActivitySerializer(SimpleNamespace(account=account, **vars(report))).data)
+    payload = SimpleNamespace(
+        account=account, latest_event_date=services.latest_event_date(), **vars(report)
+    )
+    return Response(AccountActivitySerializer(payload).data)

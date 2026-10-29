@@ -5,7 +5,7 @@ from io import StringIO
 from django.core.management import call_command
 from rest_framework.test import APITestCase
 
-from activity.models import Location
+from activity.models import ActivityEvent, Location
 from activity.tests.factories import EventFactory, add_account
 
 UTC = timezone.utc
@@ -61,7 +61,9 @@ class ActivityResponseTests(APITestCase):
     def test_response_shape(self):
         data = self.get(as_of="2026-05-11").json()
 
-        self.assertEqual(set(data), {"account", "as_of", "week", "headline", "locations"})
+        self.assertEqual(
+            set(data), {"account", "as_of", "latest_event_date", "week", "headline", "locations"}
+        )
         self.assertEqual(data["account"], {"id": 1, "name": "Alpha", "timezone": "America/Chicago"})
         self.assertEqual(data["as_of"], "2026-05-11")
         self.assertEqual(data["week"], {"start": "2026-05-04", "end": "2026-05-10"})
@@ -95,6 +97,17 @@ class ActivityResponseTests(APITestCase):
 
         self.assertEqual(data["as_of"], "2026-05-12")
         self.assertEqual(data["week"], {"start": "2026-05-04", "end": "2026-05-10"})
+
+    def test_latest_event_date_is_the_maximum_allowed_as_of(self):
+        data = self.get(as_of="2026-05-04").json()  # a historical as_of does not change it
+        self.assertEqual(data["latest_event_date"], "2026-05-12")
+        self.assertEqual(self.get(as_of=data["latest_event_date"]).status_code, 200)
+
+    def test_latest_event_date_is_null_without_events(self):
+        ActivityEvent.objects.all().delete()
+        data = self.get(as_of="2026-05-11").json()
+        self.assertIsNone(data["latest_event_date"])
+        self.assertEqual(data["locations"], [])
 
     def test_as_of_is_echoed_in_canonical_form(self):
         self.assertEqual(self.get(as_of="2026-5-11").json()["as_of"], "2026-05-11")
@@ -348,6 +361,8 @@ class SeedApiTests(APITestCase):
         for account in self.client.get("/api/accounts/").json():
             for as_of in ("2026-02-09", "2026-04-13", "2026-07-27"):
                 data = self.activity(account["id"], as_of=as_of)
-                self.assertEqual(set(data), {"account", "as_of", "week", "headline", "locations"})
+                self.assertEqual(
+                    set(data), {"account", "as_of", "latest_event_date", "week", "headline", "locations"}
+                )
                 for location in data["locations"]:
                     self.assertEqual(set(location), LOCATION_KEYS)
