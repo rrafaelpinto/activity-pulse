@@ -48,6 +48,25 @@ I also decided to allow multiple locations to remain expanded, making it easier 
 
 This improvement was not about adding more features. It was about making the existing calculations easier to understand and trust.
 
+## What I Would Improve for a Production Project
+
+For this take-home, I intentionally kept the Claude Code harness simple. The goal was to have clear instructions, a lightweight planning process, meaningful tests, and a reliable record of AI interactions, without spending too much time building tooling around a small project.
+
+For a production project, I would invest more in the repository's engineering guidelines and automated checks.
+
+I would extend `CLAUDE.md` with clearer conventions for project structure, separation of responsibilities, API contracts, database migrations, error handling, and testing. I would also define rules for avoiding unnecessary abstractions, keeping business logic outside views, and documenting significant architectural decisions.
+
+I would introduce reusable agent skills for specific review tasks, such as:
+
+- **Code and PR review:** check changes against repository conventions, architectural boundaries, API compatibility, and test expectations.
+- **Database performance:** identify potential N+1 queries, inefficient ORM usage, missing indexes, and unnecessary database access.
+- **Test quality:** review coverage of critical business rules and edge cases, identify weak assertions, and check coverage reports without treating a percentage as the only quality metric.
+- **Security review:** check permissions, input validation, sensitive data handling, and common Django/DRF security risks.
+
+These checks should complement CI and human review, not replace them. I would also avoid running every skill on every change. The checks should be selected based on the files changed and the risks involved.
+
+The main lesson is that a good AI development harness should make the agent's work more consistent and easier to verify. But the harness itself must remain proportional to the project's size and complexity.
+
 ## What I learned
 
 Claude Code was useful for implementing changes quickly, exploring alternatives, and running verification across the backend and frontend. It also helped investigate edge cases that would have taken more time to explore manually.
