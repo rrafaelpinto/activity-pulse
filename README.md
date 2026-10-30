@@ -10,6 +10,11 @@ activity (calls, leads, appointments) with that account's usual week and shows w
 `PLAN.md` is the original plan, kept unchanged as a record. This README describes what is built; see
 [Differences from PLAN.md](#differences-from-planmd).
 
+## Screenshot
+
+![Activity Pulse dashboard showing a weekly comparison and expanded location history](docs/screenshots/dashboard.png)
+
+
 ## Run it
 
 Requirements: Python 3.12 (tested; Django 5.2 supports 3.10+), Node 22.12+ (tested on 24) and npm.
