@@ -247,3 +247,11 @@ Later decisions that supersede the plan (each is in `ai-log/DECISIONS.md`):
 `ai-log/DECISIONS.md` lists every decision, correction and rejection by the user, linked to the session where it
 happened; `ai-log/sessions/` holds the full exported conversations; `CLAUDE.md` holds the working rules given to the
 agent. An AI coding agent built, tested and reviewed this code under that supervision.
+
+## With One More Day
+
+I would prioritize validating the statistical approach rather than adding features: test sensitivity to different baseline windows, sustained trends, and prolonged inactivity, and assess whether data freshness can be distinguished from real reductions in activity. The goal is more reliable signals without losing deterministic, explainable behavior.
+
+## Development Reflection
+
+Claude Code (Claude Sonnet 5.5, High effort) was used for implementation and verification. See [AI-assisted development reflection](ai-log/REFLECTION.md) for the main interventions, limitations, and open product questions, and [session exports](ai-log/sessions/) for the actual agent interactions.
